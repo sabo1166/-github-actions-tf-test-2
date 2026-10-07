@@ -1,4 +1,3 @@
-```yaml
 name: Terraform Deploy dev
 
 on:
@@ -77,14 +76,14 @@ jobs:
       # --------------------------------------------------------
       # Terraform Init
       # --------------------------------------------------------
-      - name: Terraform Init
+      name: Terraform Init
       working-directory: ${{ env.TF_DIR }}
       run: terraform init
 
       # --------------------------------------------------------
       # Terraform Validate
       # --------------------------------------------------------
-      - name: Terraform Validate
+        name: Terraform Validate
         working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
@@ -200,4 +199,3 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve tfplan
-```
