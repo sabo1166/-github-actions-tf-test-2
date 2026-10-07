@@ -6,13 +6,15 @@ name: Terraform TEST
 # *** APPLY IS BLOCKED until the AMI is verified for us-east-2 ***
 # env/test uses ami-0e34b50e714a297f1, which has NOT been verified in us-east-2 (AMI IDs are
 # region-specific). Planning is always allowed so the plan can be inspected first; the apply job
-# runs only when BOTH apply=true AND ami_verified=true. Tick ami_verified only after the AMI is
-# confirmed there or replaced with an explicitly approved one.
+# runs only when ami_verified=true. Tick ami_verified only after the AMI is confirmed there or
+# replaced with an explicitly approved one.
 #
 # Flow: plan -> upload exact plan -> AMI gate (ami_verified) -> (manual approval via the "test"
 # GitHub environment) -> apply that exact plan. The apply job never creates a new plan.
 #
-# Manual only. Run with apply=false (default) to plan only.
+# Manual only (workflow_dispatch). With ami_verified=false (default) the run stops after the plan
+# artifact is uploaded. With ami_verified=true the apply job follows and is paused by the "test"
+# environment's required reviewers; without reviewers on "test" it applies immediately.
 # Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, plus the optional
 # AWS_SESSION_TOKEN for temporary AWS lab credentials (AWS lab, no OIDC).
 
@@ -21,10 +23,6 @@ on:
     inputs:
       ami_verified:
         description: "I confirm the AMI in env/test is valid in us-east-2 (required to apply; does not affect plan)"
-        type: boolean
-        default: false
-      apply:
-        description: "Apply the saved plan after the approval gate (false = plan only)"
         type: boolean
         default: false
 
@@ -104,8 +102,8 @@ jobs:
   apply:
     name: Terraform Apply (test)
     needs: plan
-    # Both conditions are required: the user asked to apply AND the AMI was confirmed for us-east-2.
-    if: ${{ inputs.apply == true && inputs.ami_verified == true }}
+    # AMI safety gate: apply runs only if the AMI was confirmed for us-east-2.
+    if: ${{ inputs.ami_verified == true }}
     runs-on: ubuntu-latest
     # Configure required reviewers on the "test" environment (Settings > Environments) for approval.
     environment: test
