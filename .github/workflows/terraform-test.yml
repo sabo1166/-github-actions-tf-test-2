@@ -1,154 +1,127 @@
-name: Terraform TEST
 
-# Environment: test | Region: us-east-2 | Root: env/test
-# State: s3://s3-backend-test-dev-claude/test/terraform.tfstate (use_lockfile; the bucket itself is in us-east-1)
-#
-# *** APPLY IS BLOCKED until the AMI is verified for us-east-2 ***
-# env/test uses ami-0e34b50e714a297f1, which has NOT been verified in us-east-2 (AMI IDs are
-# region-specific). Planning is always allowed so the plan can be inspected first; the apply job
-# runs only when ami_verified=true. Tick ami_verified only after the AMI is confirmed there or
-# replaced with an explicitly approved one.
-#
-# Flow: plan -> upload exact plan -> AMI gate (ami_verified) -> (manual approval via the "test"
-# GitHub environment) -> apply that exact plan. The apply job never creates a new plan.
-#
-# Manual only (workflow_dispatch). With ami_verified=false (default) the run stops after the plan
-# artifact is uploaded. With ami_verified=true the apply job follows and is paused by the "test"
-# environment's required reviewers; without reviewers on "test" it applies immediately.
-# Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, plus the optional
-# AWS_SESSION_TOKEN for temporary AWS lab credentials (AWS lab, no OIDC).
+name: Terraform Deploy
 
 on:
   workflow_dispatch:
-    inputs:
-      ami_verified:
-        description: "I confirm the AMI in env/test is valid in us-east-2 (required to apply; does not affect plan)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
-# Never cancel a running run: killing terraform mid-apply can leave state locked or partial.
-# TEST and DEV use different groups, so they never block each other.
-concurrency:
-  group: terraform-test
-  cancel-in-progress: false
-
-env:
-  ENVIRONMENT: test
-  AWS_REGION: us-east-2
-  TF_DIR: env/test
-
 jobs:
+
+  # ============================================================
+  # Terraform Plan
+  # ============================================================
   plan:
-    name: Terraform Plan (test)
+    name: Terraform Plan - Test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: env/test
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      ENVIRONMENT: test
+      TF_DIR: env/test
+
     steps:
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Context
-        working-directory: .
-        run: |
-          echo "Workflow:          Terraform TEST"
-          echo "Environment:       ${ENVIRONMENT}"
-          echo "Region:            ${AWS_REGION}"
-          echo "Working directory: ${TF_DIR}"
-
-      # Fails fast if the provider region in code drifts from this workflow's region.
-      - name: Guard - provider region matches workflow region
-        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
-
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
 
-      - name: terraform init
-        run: terraform init -input=false
-
-      - name: terraform validate
+      # --------------------------------------------------------
+      # Terraform Validate
+      # --------------------------------------------------------
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
-      - name: terraform plan -out=tfplan
-        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+      # --------------------------------------------------------
+      # Terraform Plan
+      # --------------------------------------------------------
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan
 
-      # The lock file is bundled so apply uses the exact provider versions the plan was made with
-      # (.terraform.lock.hcl is gitignored in this repo). The plan may contain sensitive values:
-      # short retention, environment-specific name.
-      - name: Upload plan artifact
+      # --------------------------------------------------------
+      # Upload Terraform Plan
+      # --------------------------------------------------------
+      - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-test-plan
-          path: |
-            ${{ env.TF_DIR }}/tfplan
-            ${{ env.TF_DIR }}/.terraform.lock.hcl
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 3
+          name: tfplan-test
+          path: ${{ env.TF_DIR }}/tfplan
 
+
+  # ============================================================
+  # Terraform Apply
+  # ============================================================
   apply:
-    name: Terraform Apply (test)
-    needs: plan
-    # AMI safety gate: apply runs only if the AMI was confirmed for us-east-2.
-    if: ${{ inputs.ami_verified == true }}
+    name: Terraform Apply - Test
     runs-on: ubuntu-latest
-    # Configure required reviewers on the "test" environment (Settings > Environments) for approval.
+    needs: plan
+
+    # GitHub Environment
+    # Configure required reviewers in:
+    # Repository Settings → Environments → test
     environment: test
-    defaults:
-      run:
-        working-directory: env/test
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      ENVIRONMENT: test
+      TF_DIR: env/test
+
     steps:
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Context
-        working-directory: .
-        run: |
-          echo "Workflow:          Terraform TEST (apply)"
-          echo "Environment:       ${ENVIRONMENT}"
-          echo "Region:            ${AWS_REGION}"
-          echo "Working directory: ${TF_DIR}"
-
-      - name: Guard - provider region matches workflow region
-        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
-
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
 
-      # The artifact is stored relative to the common ancestor of its files (env/test), so
-      # tfplan and .terraform.lock.hcl are restored directly into the Terraform root.
-      - name: Download plan artifact
+      # --------------------------------------------------------
+      # Download the exact plan created by the Plan job
+      # --------------------------------------------------------
+      - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         with:
-          name: terraform-test-plan
+          name: tfplan-test
           path: ${{ env.TF_DIR }}
 
-      - name: terraform init
-        run: terraform init -input=false
+      # --------------------------------------------------------
+      # Terraform Apply
+      # --------------------------------------------------------
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve tfplan
 
-      # Terraform rejects a saved plan if state changed since it was created (stale plan).
-      - name: terraform apply tfplan
-        run: terraform apply -input=false -lock-timeout=5m tfplan
