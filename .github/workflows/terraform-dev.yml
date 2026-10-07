@@ -96,4 +96,47 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  apply
+  apply:
+    name: Terraform Apply (dev)
+    needs: plan
+    if: ${{ inputs.apply }}
+    runs-on: ubuntu-latest
+    environment: dev
+    defaults:
+      run:
+        working-directory: env/dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Context
+        run: |
+          echo "Workflow: Terraform DEV (apply)"
+          echo "Environment: ${ENVIRONMENT}"
+          echo "Region: ${AWS_REGION}"
+          echo "Working directory: ${TF_DIR}"
+
+      - name: Guard - provider region matches workflow region
+        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-dev-plan
+          path: ${{ env.TF_DIR }}
+
+      - name: terraform apply tfplan
+        run: terraform apply -input=false -lock-timeout=5m tfplan
