@@ -1,7 +1,7 @@
 name: Terraform DEV
 # Environment: dev | Region: us-east-1 | Root: env/dev
 # State: s3://s3-backend-test-dev-claude/dev/terraform.tfstate (use_lockfile)
-# Flow: init -> plan -> upload plan -> (manual approval via "dev" environment) -> apply exact plan
+# Flow: init -> validate -> plan -> (manual approval via "dev" environment) -> apply exact plan
 # Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN)
 
 on:
@@ -35,16 +35,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Context
-        run: |
-          echo "Workflow: Terraform DEV (init)"
-          echo "Environment: ${ENVIRONMENT}"
-          echo "Region: ${AWS_REGION}"
-          echo "Working directory: ${TF_DIR}"
-
-      - name: Guard - provider region matches workflow region
-        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -61,8 +51,8 @@ jobs:
       - name: terraform init
         run: terraform init -input=false
 
-  plan:
-    name: Terraform Plan (dev)
+  validate:
+    name: Terraform Validate (dev)
     needs: init
     runs-on: ubuntu-latest
     defaults:
@@ -72,15 +62,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Context
-        run: |
-          echo "Workflow: Terraform DEV (plan)"
-          echo "Environment: ${ENVIRONMENT}"
-          echo "Region: ${AWS_REGION}"
-          echo "Working directory: ${TF_DIR}"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: terraform validate
         run: terraform validate
+
+  plan:
+    name: Terraform Plan (dev)
+    needs: validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: env/dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: terraform plan -out=tfplan
         run: terraform plan -input=false -lock-timeout=5m -out=tfplan
@@ -108,16 +112,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Context
-        run: |
-          echo "Workflow: Terraform DEV (apply)"
-          echo "Environment: ${ENVIRONMENT}"
-          echo "Region: ${AWS_REGION}"
-          echo "Working directory: ${TF_DIR}"
-
-      - name: Guard - provider region matches workflow region
-        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
