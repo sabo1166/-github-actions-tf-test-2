@@ -1,4 +1,3 @@
-```yaml
 name: Terraform Deploy Test
 
 on:
@@ -198,4 +197,4 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve tfplan
-```
+
