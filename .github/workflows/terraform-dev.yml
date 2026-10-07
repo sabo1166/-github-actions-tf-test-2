@@ -1,0 +1,142 @@
+name: Terraform DEV
+
+# Environment: dev | Region: us-east-1 | Root: env/dev
+# State: s3://s3-backend-test-dev-claude/dev/terraform.tfstate (use_lockfile)
+#
+# Flow: plan -> upload exact plan -> (manual approval via the "dev" GitHub
+# environment) -> apply that exact plan. The apply job never creates a new plan.
+#
+# Manual only. Run with apply=false (default) to plan only.
+# Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (AWS lab, no OIDC).
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the saved plan after the approval gate (false = plan only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never cancel a running run: killing terraform mid-apply can leave state locked or partial.
+# DEV and TEST use different groups, so they never block each other.
+concurrency:
+  group: terraform-dev
+  cancel-in-progress: false
+
+env:
+  ENVIRONMENT: dev
+  AWS_REGION: us-east-1
+  TF_DIR: env/dev
+
+jobs:
+  plan:
+    name: Plan (dev, us-east-1)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: env/dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Context
+        working-directory: .
+        run: |
+          echo "Workflow:          Terraform DEV"
+          echo "Environment:       ${ENVIRONMENT}"
+          echo "Region:            ${AWS_REGION}"
+          echo "Working directory: ${TF_DIR}"
+
+      # Fails fast if the provider region in code drifts from this workflow's region.
+      - name: Guard - provider region matches workflow region
+        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan -out=tfplan
+        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+
+      # The lock file is bundled so apply uses the exact provider versions the plan was made with
+      # (.terraform.lock.hcl is gitignored in this repo). The plan may contain sensitive values:
+      # short retention, environment-specific name.
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-dev-plan
+          path: |
+            ${{ env.TF_DIR }}/tfplan
+            ${{ env.TF_DIR }}/.terraform.lock.hcl
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  apply:
+    name: Apply saved plan (dev, us-east-1)
+    needs: plan
+    if: ${{ inputs.apply }}
+    runs-on: ubuntu-latest
+    # Configure required reviewers on the "dev" environment (Settings > Environments) for approval.
+    environment: dev
+    defaults:
+      run:
+        working-directory: env/dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Context
+        working-directory: .
+        run: |
+          echo "Workflow:          Terraform DEV (apply)"
+          echo "Environment:       ${ENVIRONMENT}"
+          echo "Region:            ${AWS_REGION}"
+          echo "Working directory: ${TF_DIR}"
+
+      - name: Guard - provider region matches workflow region
+        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The artifact is stored relative to the common ancestor of its files (env/dev), so
+      # tfplan and .terraform.lock.hcl are restored directly into the Terraform root.
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-dev-plan
+          path: ${{ env.TF_DIR }}
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      # Terraform rejects a saved plan if state changed since it was created (stale plan).
+      - name: terraform apply tfplan
+        run: terraform apply -input=false -lock-timeout=5m tfplan

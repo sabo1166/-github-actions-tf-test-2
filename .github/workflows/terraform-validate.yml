@@ -1,0 +1,74 @@
+name: Terraform Validate
+
+# Static quality gate for the Terraform roots (env/dev, env/test).
+# No AWS credentials are used: `init -backend=false` only downloads providers
+# and modules, and `validate` does not call AWS. Nothing is planned or applied.
+
+on:
+  pull_request:
+    paths:
+      - "env/**"
+      - "modules/**"
+      - ".github/workflows/terraform-validate.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "env/**"
+      - "modules/**"
+      - ".github/workflows/terraform-validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Validation is read-only, so a newer run on the same ref may cancel an older one.
+concurrency:
+  group: terraform-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: Terraform fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive -diff
+
+  validate:
+    name: Terraform validate (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # a failure in one root must not hide the result of the other
+      matrix:
+        environment: [dev, test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Context
+        run: |
+          echo "Workflow:          Terraform Validate"
+          echo "Environment:       ${{ matrix.environment }}"
+          echo "Working directory: env/${{ matrix.environment }}"
+
+      - name: terraform init -backend=false
+        working-directory: env/${{ matrix.environment }}
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: env/${{ matrix.environment }}
+        run: terraform validate
