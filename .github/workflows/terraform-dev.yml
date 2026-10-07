@@ -1,3 +1,4 @@
+```yaml
 name: Terraform Deploy dev
 
 on:
@@ -9,10 +10,10 @@ permissions:
 jobs:
 
   # ============================================================
-  # Terraform Plan
+  # Terraform Init
   # ============================================================
-  plan:
-    name: Terraform Plan - Dev
+  init:
+    name: Terraform Init - Dev
     runs-on: ubuntu-latest
 
     env:
@@ -43,12 +44,86 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform init
 
+
+  # ============================================================
+  # Terraform Validate
+  # ============================================================
+  validate:
+    name: Terraform Validate - Dev
+    runs-on: ubuntu-latest
+    needs: init
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-west-2
+      ENVIRONMENT: dev
+      TF_DIR: env/dev
+
+    steps:
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform Init
+      working-directory: ${{ env.TF_DIR }}
+      run: terraform init
+
       # --------------------------------------------------------
       # Terraform Validate
       # --------------------------------------------------------
       - name: Terraform Validate
         working-directory: ${{ env.TF_DIR }}
         run: terraform validate
+
+
+  # ============================================================
+  # Terraform Plan
+  # ============================================================
+  plan:
+    name: Terraform Plan - Dev
+    runs-on: ubuntu-latest
+    needs: validate
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-west-2
+      ENVIRONMENT: dev
+      TF_DIR: env/dev
+
+    steps:
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
 
       # --------------------------------------------------------
       # Terraform Plan
@@ -75,15 +150,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: plan
 
+    # ----------------------------------------------------------
     # GitHub Environment
-    # Configure required reviewers in:
+    # Configure required reviewers:
     # Repository Settings → Environments → dev
+    # ----------------------------------------------------------
     environment: dev
 
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-west-2
       ENVIRONMENT: dev
       TF_DIR: env/dev
 
@@ -123,4 +200,4 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve tfplan
-
+```
