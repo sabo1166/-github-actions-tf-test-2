@@ -48,6 +48,15 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Cache Terraform modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            env/dev/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('env/dev/.terraform.lock.hcl') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
       - name: terraform init
         run: terraform init -input=false
 
@@ -67,6 +76,18 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Cache Terraform modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            env/dev/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('env/dev/.terraform.lock.hcl') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: terraform init
+        run: terraform init -input=false
+
       - name: terraform validate
         run: terraform validate
 
@@ -85,6 +106,15 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
+
+      - name: Cache Terraform modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            env/dev/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('env/dev/.terraform.lock.hcl') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
 
       - name: terraform plan -out=tfplan
         run: terraform plan -input=false -lock-timeout=5m -out=tfplan
