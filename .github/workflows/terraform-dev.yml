@@ -1,166 +1,126 @@
-name: Terraform DEV
-# Environment: dev | Region: us-east-1 | Root: env/dev
-# State: s3://s3-backend-test-dev-claude/dev/terraform.tfstate (use_lockfile)
-# Flow: init -> validate -> plan -> (manual approval via "dev" environment) -> apply exact plan
-# Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN)
+name: Terraform Deploy dev
 
 on:
   workflow_dispatch:
-    inputs:
-      apply:
-        description: "Apply the saved plan after approval (false = plan only)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: terraform-dev
-  cancel-in-progress: false
-
-env:
-  ENVIRONMENT: dev
-  AWS_REGION: us-east-1
-  TF_DIR: env/dev
-
 jobs:
-  init:
-    name: Terraform Init (dev)
+
+  # ============================================================
+  # Terraform Plan
+  # ============================================================
+  plan:
+    name: Terraform Plan - Dev
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: env/dev
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-west-2
+      ENVIRONMENT: dev
+      TF_DIR: env/dev
+
     steps:
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
 
-      - name: Cache Terraform modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            env/dev/.terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('env/dev/.terraform.lock.hcl') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-
-      - name: terraform init
-        run: terraform init -input=false
-
-  validate:
-    name: Terraform Validate (dev)
-    needs: init
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: env/dev
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      - name: Cache Terraform modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            env/dev/.terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('env/dev/.terraform.lock.hcl') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-
-      - name: terraform init
-        run: terraform init -input=false
-
-      - name: terraform validate
+      # --------------------------------------------------------
+      # Terraform Validate
+      # --------------------------------------------------------
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
-  plan:
-    name: Terraform Plan (dev)
-    needs: validate
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: env/dev
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # --------------------------------------------------------
+      # Terraform Plan
+      # --------------------------------------------------------
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      - name: Cache Terraform modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            env/dev/.terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('env/dev/.terraform.lock.hcl') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-
-      - name: terraform plan -out=tfplan
-        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
-
-      - name: Upload plan artifact
+      # --------------------------------------------------------
+      # Upload Terraform Plan
+      # --------------------------------------------------------
+      - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-dev-plan
-          path: |
-            ${{ env.TF_DIR }}/tfplan
-            ${{ env.TF_DIR }}/.terraform.lock.hcl
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 3
+          name: tfplan-dev
+          path: ${{ env.TF_DIR }}/tfplan
 
+
+  # ============================================================
+  # Terraform Apply
+  # ============================================================
   apply:
-    name: Terraform Apply (dev)
-    needs: plan
-    if: ${{ inputs.apply }}
+    name: Terraform Apply - Dev
     runs-on: ubuntu-latest
+    needs: plan
+
+    # GitHub Environment
+    # Configure required reviewers in:
+    # Repository Settings → Environments → dev
     environment: dev
-    defaults:
-      run:
-        working-directory: env/dev
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      ENVIRONMENT: dev
+      TF_DIR: env/dev
+
     steps:
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
 
-      - name: Download plan artifact
+      # --------------------------------------------------------
+      # Download the exact plan created by the Plan job
+      # --------------------------------------------------------
+      - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         with:
-          name: terraform-dev-plan
+          name: tfplan-dev
           path: ${{ env.TF_DIR }}
 
-      - name: terraform apply tfplan
-        run: terraform apply -input=false -lock-timeout=5m tfplan
+      # --------------------------------------------------------
+      # Terraform Apply
+      # --------------------------------------------------------
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve tfplan
+
