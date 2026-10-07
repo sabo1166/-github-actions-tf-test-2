@@ -3,22 +3,24 @@ name: Terraform TEST
 # Environment: test | Region: us-east-2 | Root: env/test
 # State: s3://s3-backend-test-dev-claude/test/terraform.tfstate (use_lockfile; the bucket itself is in us-east-1)
 #
-# *** BLOCKED until the AMI is verified for us-east-2 ***
+# *** APPLY IS BLOCKED until the AMI is verified for us-east-2 ***
 # env/test uses ami-0e34b50e714a297f1, which has NOT been verified in us-east-2 (AMI IDs are
-# region-specific). The workflow refuses to run until the ami_verified input is ticked, which
-# should only happen after the AMI is confirmed there or replaced with an explicitly approved one.
+# region-specific). Planning is always allowed so the plan can be inspected first; the apply job
+# runs only when BOTH apply=true AND ami_verified=true. Tick ami_verified only after the AMI is
+# confirmed there or replaced with an explicitly approved one.
 #
-# Flow: plan -> upload exact plan -> (manual approval via the "test" GitHub
-# environment) -> apply that exact plan. The apply job never creates a new plan.
+# Flow: plan -> upload exact plan -> AMI gate (ami_verified) -> (manual approval via the "test"
+# GitHub environment) -> apply that exact plan. The apply job never creates a new plan.
 #
 # Manual only. Run with apply=false (default) to plan only.
-# Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (AWS lab, no OIDC).
+# Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, plus the optional
+# AWS_SESSION_TOKEN for temporary AWS lab credentials (AWS lab, no OIDC).
 
 on:
   workflow_dispatch:
     inputs:
       ami_verified:
-        description: "I confirm the AMI in env/test is valid in us-east-2 (REQUIRED)"
+        description: "I confirm the AMI in env/test is valid in us-east-2 (required to apply; does not affect plan)"
         type: boolean
         default: false
       apply:
@@ -42,19 +44,12 @@ env:
 
 jobs:
   plan:
-    name: Plan (test, us-east-2)
+    name: Terraform Plan (test)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: env/test
     steps:
-      - name: Guard - AMI must be verified for us-east-2
-        if: ${{ !inputs.ami_verified }}
-        working-directory: .
-        run: |
-          echo "::error::TEST is blocked: the AMI in env/test has not been verified for us-east-2."
-          exit 1
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -80,6 +75,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: terraform init
@@ -106,9 +102,10 @@ jobs:
           retention-days: 3
 
   apply:
-    name: Apply saved plan (test, us-east-2)
+    name: Terraform Apply (test)
     needs: plan
-    if: ${{ inputs.apply }}
+    # Both conditions are required: the user asked to apply AND the AMI was confirmed for us-east-2.
+    if: ${{ inputs.apply == true && inputs.ami_verified == true }}
     runs-on: ubuntu-latest
     # Configure required reviewers on the "test" environment (Settings > Environments) for approval.
     environment: test
@@ -140,6 +137,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       # The artifact is stored relative to the common ancestor of its files (env/test), so
