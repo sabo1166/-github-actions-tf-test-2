@@ -1,3 +1,29 @@
+name: Terraform DEV
+# Environment: dev | Region: us-east-1 | Root: env/dev
+# State: s3://s3-backend-test-dev-claude/dev/terraform.tfstate (use_lockfile)
+# Flow: init -> plan -> upload plan -> (manual approval via "dev" environment) -> apply exact plan
+# Authentication: repository secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the saved plan after approval (false = plan only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-dev
+  cancel-in-progress: false
+
+env:
+  ENVIRONMENT: dev
+  AWS_REGION: us-east-1
+  TF_DIR: env/dev
+
 jobs:
   init:
     name: Terraform Init (dev)
@@ -8,6 +34,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Context
+        run: |
+          echo "Workflow: Terraform DEV (init)"
+          echo "Environment: ${ENVIRONMENT}"
+          echo "Region: ${AWS_REGION}"
+          echo "Working directory: ${TF_DIR}"
+
+      - name: Guard - provider region matches workflow region
+        run: grep -Eq "region[[:space:]]*=[[:space:]]*\"${AWS_REGION}\"" provider.tf
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -35,10 +71,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Context
+        run: |
+          echo "Workflow: Terraform DEV (plan)"
+          echo "Environment: ${ENVIRONMENT}"
+          echo "Region: ${AWS_REGION}"
+          echo "Working directory: ${TF_DIR}"
+
       - name: terraform validate
         run: terraform validate
+
       - name: terraform plan -out=tfplan
         run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
         with:
@@ -50,22 +96,4 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  apply:
-    name: Terraform Apply (dev)
-    needs: plan
-    if: ${{ inputs.apply }}
-    runs-on: ubuntu-latest
-    environment: dev
-    defaults:
-      run:
-        working-directory: env/dev
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Download plan artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-dev-plan
-          path: ${{ env.TF_DIR }}
-      - name: terraform apply tfplan
-        run: terraform apply -input=false -lock-timeout=5m tfplan
+  apply
