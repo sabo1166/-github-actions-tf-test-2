@@ -6,7 +6,7 @@ module "network" {
 
 module "compute" {
   source        = "../../modules/compute"
-  ami           = "ami-0e34b50e714a297f1"
+  ami           = "ami-0d53cc9bd365ad65b"
   instance_type = "t2.micro"
   subnet_id     = module.network.subnet_id
 }
