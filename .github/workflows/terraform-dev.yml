@@ -1,130 +1,59 @@
 
-name: Terraform Deploy Dev
+name: Terraform Deployment dev
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
+# Required for GitHub OIDC
 permissions:
+  id-token: write
   contents: read
 
 jobs:
-
-  init:
-    name: Terraform Init - Dev
+  terraform:
+    name: Terraform
     runs-on: ubuntu-latest
 
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-west-2
-      ENVIRONMENT: dev
-      TF_DIR: env/dev
-
     steps:
-      - name: Checkout
+      # Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Configure AWS using OIDC
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::684160548236:role/sabo1166
+          aws-region: us-east-1
+
+      # Verify AWS identity
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
+
+      # Setup Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+      # Terraform Init
       - name: Terraform Init
-        working-directory: ${{ env.TF_DIR }}
         run: terraform init
 
+      # Terraform Format Check
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
 
-  validate:
-    name: Terraform Validate - Dev
-    runs-on: ubuntu-latest
-    needs: init
-
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-west-2
-      ENVIRONMENT: dev
-      TF_DIR: env/dev
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init
-
+      # Terraform Validate
       - name: Terraform Validate
-        working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
-
-  plan:
-    name: Terraform Plan - Dev
-    runs-on: ubuntu-latest
-    needs: validate
-
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-west-2
-      ENVIRONMENT: dev
-      TF_DIR: env/dev
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init
-
+      # Terraform Plan
       - name: Terraform Plan
-        working-directory: ${{ env.TF_DIR }}
         run: terraform plan -out=tfplan
 
-      - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tfplan-dev
-          path: ${{ env.TF_DIR }}/tfplan
-
-
-  apply:
-    name: Terraform Apply - Dev
-    runs-on: ubuntu-latest
-    needs: plan
-    environment: dev
-
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-west-2
-      ENVIRONMENT: dev
-      TF_DIR: env/dev
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init
-
-      - name: Download Plan Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan-dev
-          path: ${{ env.TF_DIR }}
-
+      # Terraform Apply
       - name: Terraform Apply
-        working-directory: ${{ env.TF_DIR }}
+        if: github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve tfplan
 
