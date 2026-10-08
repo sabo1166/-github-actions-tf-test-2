@@ -1,10 +1,7 @@
-
-
 module "network" {
   source      = "../../modules/network"
   vpc_cidr    = "10.0.0.0/24"
   subnet_cidr = "10.0.0.0/24"
-
 }
 
 module "compute" {
